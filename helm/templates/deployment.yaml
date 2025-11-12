@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aks-blob-proxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: aks-blob-proxy
+  template:
+    metadata:
+      labels:
+        app: aks-blob-proxy
+    spec:
+      containers:
+        - name: aks-blob-proxy
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          ports:
+            - containerPort: 80
+          env:
+            - name: BLOB_URL
+              value: "https://{{ .Release.Name }}storage.blob.core.windows.net/{{ .Values.container }}/index.html"

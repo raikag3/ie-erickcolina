@@ -1,0 +1,78 @@
+# pipelines/azure-pipelines-cd.yml
+trigger: none
+pr: none
+
+parameters:
+  - name: environment
+    type: string
+    default: 'dev'
+
+variables:
+  helmReleaseName: 'aks-blob-proxy'
+
+stages:
+- stage: Deploy
+  displayName: 'CD - Deploy to AKS (with manual approval)'
+  jobs:
+  - job: Prepare
+    displayName: 'Prepare deployment'
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - checkout: self
+
+    - task: AzureCLI@2
+      displayName: 'Authenticate with Azure'
+      inputs:
+        azureSubscription: '$(azureServiceConnection)'
+        scriptType: ps
+        scriptLocation: inlineScript
+        inlineScript: |
+          Write-Host "Authenticating to Azure using service connection: $(azureServiceConnection)"
+          $sub = az account show --query id -o tsv
+          Write-Host "Subscription ID: $sub"
+
+    - task: AzureCLI@2
+      displayName: 'Get AKS credentials'
+      inputs:
+        azureSubscription: '$(azureServiceConnection)'
+        scriptType: ps
+        scriptLocation: inlineScript
+        inlineScript: |
+          Write-Host "Fetching AKS credentials for cluster: $(aksName) in RG: $(resourceGroup)"
+          az aks get-credentials --resource-group $(resourceGroup) --name $(aksName) --overwrite-existing
+          Write-Host "Credentials fetched. Verifying nodes..."
+          kubectl get nodes
+
+    - task: ManualValidation@0
+      displayName: 'Manual approval before Helm deploy'
+      inputs:
+        notifyUsers: ''
+        instructions: 'Approve to continue to Helm deploy to AKS'
+        onTimeout: 'reject'
+
+  - job: DeployHelm
+    displayName: 'Helm deploy'
+    dependsOn: Prepare
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - checkout: self
+
+    - task: AzureCLI@2
+      displayName: 'Set image and deploy Helm chart'
+      inputs:
+        azureSubscription: '$(azureServiceConnection)'
+        scriptType: ps
+        scriptLocation: inlineScript
+        inlineScript: |
+          if (-not $env:imageFullName) {
+            Write-Host "imageFullName variable not set in pipeline. Please provide imageFullName (e.g. acr.azurecr.io/image:tag)."
+            exit 1
+          }
+          Write-Host "Deploying Helm chart to AKS with image: $env:imageFullName"
+          helm upgrade --install $(helmReleaseName) ./helm `
+            --set image.repository=$env:imageFullName.split(':')[0] `
+            --set image.tag=$env:imageFullName.split(':')[1] `
+            --wait --timeout 5m
+          Write-Host "Helm deploy completed."

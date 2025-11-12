@@ -1,0 +1,74 @@
+# pipelines/azure-pipelines-ci.yml
+trigger:
+  branches:
+    include:
+      - main
+
+variables:
+  imageName: 'aks-blob-proxy'
+  buildId: '$(Build.BuildId)'
+
+stages:
+- stage: BuildAndPush
+  displayName: 'CI - Build image and push to ACR'
+  jobs:
+  - job: Build
+    displayName: 'Build job'
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+
+    - checkout: self
+
+    - task: AzureCLI@2
+      displayName: 'Authenticate with Azure'
+      inputs:
+        azureSubscription: '$(azureServiceConnection)'
+        scriptType: ps
+        scriptLocation: inlineScript
+        inlineScript: |
+          Write-Host "Authenticating to Azure using service connection: $(azureServiceConnection)"
+          # Confirm expected subscription id (optional)
+          $sub = az account show --query id -o tsv
+          Write-Host "Authenticated to subscription: $sub"
+
+    - task: Bash@3
+      displayName: 'Set variables (image tag)'
+      inputs:
+        targetType: 'inline'
+        script: |
+          echo "##vso[task.setvariable variable=IMAGE_TAG]$BUILD_BUILDID"
+
+    - task: AzureCLI@2
+      displayName: 'Login to ACR'
+      inputs:
+        azureSubscription: '$(azureServiceConnection)'
+        scriptType: ps
+        scriptLocation: inlineScript
+        inlineScript: |
+          Write-Host "Preparing to login to ACR: $(acrName)"
+          az acr login --name $(acrName)
+          Write-Host "ACR login completed."
+
+    - task: AzureCLI@2
+      displayName: 'Build Docker image'
+      inputs:
+        azureSubscription: '$(azureServiceConnection)'
+        scriptType: ps
+        scriptLocation: inlineScript
+        inlineScript: |
+          Write-Host "Building Docker image: $(acrName).azurecr.io/$(imageName):$(IMAGE_TAG)"
+          docker build -t $(acrName).azurecr.io/$(imageName):$(IMAGE_TAG) ./app
+          Write-Host "Docker build finished."
+
+    - task: AzureCLI@2
+      displayName: 'Push Docker image to ACR'
+      inputs:
+        azureSubscription: '$(azureServiceConnection)'
+        scriptType: ps
+        scriptLocation: inlineScript
+        inlineScript: |
+          Write-Host "Pushing image to ACR: $(acrName).azurecr.io/$(imageName):$(IMAGE_TAG)"
+          docker push $(acrName).azurecr.io/$(imageName):$(IMAGE_TAG)
+          Write-Host "Image pushed successfully."
+          Write-Host "##vso[task.setvariable variable=imageFullName]$(acrName).azurecr.io/$(imageName):$(IMAGE_TAG)"

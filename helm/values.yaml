@@ -1,0 +1,11 @@
+image:
+  repository: acraksblobdemo.azurecr.io/aks-blob-proxy
+  tag: latest
+
+service:
+  port: 80
+
+ingress:
+  enabled: true
+  host: aksblob-demo.eastus.cloudapp.azure.com
+  className: nginx

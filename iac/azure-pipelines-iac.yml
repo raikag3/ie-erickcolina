@@ -1,0 +1,127 @@
+trigger: none
+
+parameters:
+  - name: location
+    type: string
+    default: "eastus"
+
+  - name: resourceGroup
+    type: string
+    default: "aksblob-demo"
+
+  - name: storageAccount
+    type: string
+    default: "aksblobstoragedemo"
+
+  - name: containerName
+    type: string
+    default: "webcontent"
+
+  - name: acrName
+    type: string
+    default: "acraksblobdemo"
+
+  - name: aksName
+    type: string
+    default: "aksblobdemo"
+
+  - name: createRG
+    type: boolean
+    default: true
+
+  - name: createStorage
+    type: boolean
+    default: true
+
+  - name: createContainer
+    type: boolean
+    default: true
+
+  - name: createACR
+    type: boolean
+    default: true
+
+  - name: createAKS
+    type: boolean
+    default: true
+
+stages:
+- stage: Infrastructure
+  displayName: "Provision Azure Free Tier Resources"
+  jobs:
+  - job: InfraJob
+    displayName: "Create Azure Infrastructure"
+    pool:
+      vmImage: 'windows-latest'
+
+    steps:
+    - task: AzureCLI@2
+      displayName: "Login to Azure"
+      inputs:
+        azureSubscription: $(azureServiceConnection)
+        scriptType: ps
+        scriptLocation: inlineScript
+        inlineScript: |
+          Write-Host "Authenticated successfully with the Azure service connection."
+
+    - ${{ if eq(parameters.createRG, true) }}:
+      - task: AzureCLI@2
+        displayName: "Create Resource Group"
+        inputs:
+          azureSubscription: $(azureServiceConnection)
+          scriptType: ps
+          scriptLocation: inlineScript
+          inlineScript: |
+            Write-Host "Creating resource group: ${{ parameters.resourceGroup }} in location: ${{ parameters.location }}"
+            az group create -n ${{ parameters.resourceGroup }} -l ${{ parameters.location }}
+            Write-Host "Resource group created successfully."
+
+    - ${{ if eq(parameters.createStorage, true) }}:
+      - task: AzureCLI@2
+        displayName: "Create Storage Account"
+        inputs:
+          azureSubscription: $(azureServiceConnection)
+          scriptType: ps
+          scriptLocation: inlineScript
+          inlineScript: |
+            Write-Host "Creating storage account: ${{ parameters.storageAccount }}"
+            az storage account create -n ${{ parameters.storageAccount }} -g ${{ parameters.resourceGroup }} -l ${{ parameters.location }} --sku Standard_LRS
+            Write-Host "Storage account created successfully."
+
+    - ${{ if eq(parameters.createContainer, true) }}:
+      - task: AzureCLI@2
+        displayName: "Create Blob Container and Upload Sample File"
+        inputs:
+          azureSubscription: $(azureServiceConnection)
+          scriptType: ps
+          scriptLocation: inlineScript
+          inlineScript: |
+            Write-Host "Creating container: ${{ parameters.containerName }}"
+            az storage container create --account-name ${{ parameters.storageAccount }} --name ${{ parameters.containerName }} --auth-mode login
+            echo "<h1>Hello from Azure Blob Storage</h1>" > index.html
+            az storage blob upload --account-name ${{ parameters.storageAccount }} --container-name ${{ parameters.containerName }} --name index.html --file index.html --auth-mode login
+            Write-Host "Blob container and test file created successfully."
+
+    - ${{ if eq(parameters.createACR, true) }}:
+      - task: AzureCLI@2
+        displayName: "Create Azure Container Registry"
+        inputs:
+          azureSubscription: $(azureServiceConnection)
+          scriptType: ps
+          scriptLocation: inlineScript
+          inlineScript: |
+            Write-Host "Creating ACR: ${{ parameters.acrName }}"
+            az acr create -n ${{ parameters.acrName }} -g ${{ parameters.resourceGroup }} --sku Basic --admin-enabled true
+            Write-Host "ACR created successfully."
+
+    - ${{ if eq(parameters.createAKS, true) }}:
+      - task: AzureCLI@2
+        displayName: "Create AKS Cluster"
+        inputs:
+          azureSubscription: $(azureServiceConnection)
+          scriptType: ps
+          scriptLocation: inlineScript
+          inlineScript: |
+            Write-Host "Creating AKS cluster: ${{ parameters.aksName }}"
+            az aks create -n ${{ parameters.aksName }} -g ${{ parameters.resourceGroup }} --enable-managed-identity --attach-acr ${{ parameters.acrName }} --node-count 1 --node-vm-size Standard_B2s --generate-ssh-keys
+            Write-Host "AKS cluster created successfully."
