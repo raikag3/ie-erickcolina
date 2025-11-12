@@ -26,7 +26,7 @@ The Cloud Services team would like to expose the contents of an S3 bucket throug
 
 ---
 
-## Approach and Rationale: Implemented on **Azure**
+## Implemented on **Azure**
 
 Although the challenge was originally designed for AWS, I implemented it using **Azure** for the following reasons:
 
@@ -115,3 +115,66 @@ Main steps:
 2. **Retrieve AKS credentials** (`az aks get-credentials`).  
 3. **Manual Approval Gate** (ManualValidation) before deployment.  
 4. **Helm Deploy** to AKS using:helm upgrade
+
+
+## How to test the pipelines
+
+This section explains, step-by-step, how to run and validate the three pipelines in Azure DevOps: **IaC (create infra)**, **CI (build image)** and **CD (deploy app)**. It includes the exact checks and commands you should execute to confirm the resources and the application are working.
+
+### Prerequisites
+- An Azure subscription (Pay-As-You-Go) and an Azure DevOps organization with project access.  
+- An Azure DevOps **Service Connection** (Azure Resource Manager - service principal) authorized for the project.  
+- An agent available for pipeline execution:
+  - Preferably a Microsoft-hosted agent (requires parallelism grant), or
+  - A self-hosted agent registered in an agent pool (recommended to avoid hosted parallelism limits).  
+- `az` CLI (locally or via Cloud Shell) and `kubectl` installed for manual validation, or use the Azure Cloud Shell from the portal.
+
+> Pipeline variable names used below: `azureServiceConnection`, `resourceGroup`, `aksName`, `acrName`, `storageAccount`, `containerName`, `imageFullName`.
+
+---
+
+### 1) Run the IaC pipeline (create infra)
+Pipeline file: `iac/azure-pipelines-iac.yml`
+
+**What it does**
+- Creates the Resource Group, Storage Account + Blob Container, ACR and AKS (selectable via checkboxes).  
+- Optionally uploads a sample `index.html` to the blob container.
+
+**How to run (Azure DevOps UI)**
+1. Pipelines / New pipeline / select repo / Existing Azure Pipelines YAML / choose `iac/azure-pipelines-iac.yml`.  
+2. In the pipeline definition screen, set these variables (or via the run dialog):
+   - `azureServiceConnection` / select your Service Connection (e.g. `Azure-Free-Tier-Connection`).
+   - `location` (e.g. `eastus`), `resourceGroup` (e.g. `rg-cloudservices-demo`), `storageAccount`, `containerName`, `acrName`, `aksName`.
+3. Click **Run pipeline**. The run dialog will show the boolean checkboxes:
+   - `createRG`, `createStorage`, `createContainer`, `createACR`, `createAKS`
+   - Mark all that you want to create (for the first run mark all).
+4. Start the run.
+
+**What to expect in logs**
+- Messages like:
+  - `Creating resource group: <name>`
+  - `Creating storage account: <name>`
+  - `Creating ACR: <name>`
+  - `Creating AKS cluster: <name>`
+- Final confirmation: each task should print `created successfully`.
+
+**Manual validations (after pipeline completes)**
+Run in Azure CLI (or use Portal):
+
+```bash
+# verify resource group
+az group show -n <resourceGroup>
+
+# storage account
+az storage account show -n <storageAccount> -g <resourceGroup>
+
+# list blobs (requires az storage commands; use --auth-mode login)
+az storage blob list --account-name <storageAccount> -c <containerName> -o table
+
+# ACR
+az acr show -n <acrName> -g <resourceGroup>
+
+# AKS
+az aks show -n <aksName> -g <resourceGroup>
+az aks get-credentials -n <aksName> -g <resourceGroup>
+kubectl get nodes
